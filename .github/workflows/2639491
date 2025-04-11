@@ -1,0 +1,78 @@
+name: CM
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # 除非绝对必要，否则避免设置此环境变量为true
+  # ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        boost_version: [1.79.0, 1.84.0]
+        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            variation: linux
+          - os: macos-latest
+            variation: mac
+          - boost_version: 1.79.0
+            ndk_version: 25.0.8775105
+          - boost_version: 1.84.0
+            ndk_version: 25.2.9519653
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Checkout Sources
+      uses: actions/checkout@v3 # 使用最新版本的动作
+      with:
+        fetch-depth: 1
+
+    - name: Setup Android Environment
+      uses: android-actions/setup-android@v2
+
+    - name: Install Android NDK
+      run: sdkmanager --install "ndk;${{ matrix.ndk_version }}"
+
+    - name: Setup Environment Variables
+      run: |
+        echo "NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${{ matrix.ndk_version }}" >> $GITHUB_ENV
+        echo "NUM_CPU=$(nproc)" >> $GITHUB_ENV
+        mkdir -p bins/${{ matrix.variation }} logs/${{ matrix.variation }}
+
+    - name: Build Boost for Android on ${{ matrix.variation }}
+      run: CXXFLAGS="-std=c++14" ./build-android.sh --boost=${{ matrix.boost_version }} --arch=${{ matrix.abi }} --with-libraries=atomic,random,date_time,filesystem,system,thread,chrono,locale "${NDK_ROOT}"
+
+    - name: Prepare Binaries
+      run: |
+        mv build/out/* ${GITHUB_WORKSPACE}/bins/${{ matrix.variation }}/ || true
+        find ${GITHUB_WORKSPACE}/bins/${{ matrix.variation }} -type d -name "include" -exec rm -rf {} +
+        ls -alFR ${GITHUB_WORKSPACE}/bins
+      if: always()
+
+    - name: Upload Binaries
+      uses: actions/upload-artifact@v3 # 使用最新版本的动作
+      with:
+        name: binaries_${{ matrix.boost_version }}_${{ matrix.abi }}
+        path: ./bins
+      if: always()
+
+    - name: Prepare Logs
+      run: |
+        mv logs/*.log ${GITHUB_WORKSPACE}/logs/${{ matrix.variation }}/ || true
+        ls -alFR ${GITHUB_WORKSPACE}/logs
+      if: always()
+
+    - name: Upload Logs
+      uses: actions/upload-artifact@v3 # 使用最新版本的动作
+      with:
+        name: logs_${{ matrix.boost_version }}
+        path: ./logs
+      if: always()
